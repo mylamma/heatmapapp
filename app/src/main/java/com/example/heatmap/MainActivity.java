@@ -174,6 +174,7 @@ public class MainActivity extends Activity {
     };
 
     private TreemapView treemapView;
+    private LinearLayout macroBarContainer;
     private TextView macroBarLine1;
     private TextView macroBarLine2;
     private final Handler handler = new Handler();
@@ -197,7 +198,7 @@ public class MainActivity extends Activity {
             LinearLayout root = new LinearLayout(this);
             root.setOrientation(LinearLayout.VERTICAL);
 
-            LinearLayout macroBarContainer = new LinearLayout(this);
+            macroBarContainer = new LinearLayout(this);
             macroBarContainer.setOrientation(LinearLayout.VERTICAL);
             macroBarContainer.setBackgroundColor(Color.BLACK);
 
@@ -285,6 +286,7 @@ public class MainActivity extends Activity {
         currentMarket = target;
         treemapView.setSectors(currentMarket == Market.US ? SECTORS_US : SECTORS_KR);
         treemapView.refreshChanges(); // 캐시된 마지막 값으로 즉시 표시 + e-ink 잔상 제거 플래시
+        flashMacroBar();
         renderMacroBar(); // 시장 라벨만 갱신, 환율/지수 값은 그대로 유지 (재조회 불필요)
         new StockFetchTask().execute();
     }
@@ -292,6 +294,7 @@ public class MainActivity extends Activity {
     /** 오른쪽 버튼: 1시간 자동 주기와 별개로 즉시 최신 정보를 불러옴 */
     private void manualRefresh() {
         treemapView.refreshChanges(); // e-ink 잔상 제거 플래시
+        flashMacroBar();
         new StockFetchTask().execute();
         new MacroFetchTask().execute();
         Toast.makeText(this, "새로고침 중...", Toast.LENGTH_SHORT).show();
@@ -386,6 +389,7 @@ public class MainActivity extends Activity {
         @Override
         protected void onPostExecute(Void result) {
             treemapView.refreshChanges();
+            flashMacroBar();
         }
     }
 
@@ -477,6 +481,30 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 상단 환율/지수 배너도 트리맵과 같은 타이밍으로 흑백 반전시켜 잔상 제거 효과를 줌 */
+    private void flashMacroBar() {
+        doMacroFlash(2);
+    }
+
+    private void doMacroFlash(final int remaining) {
+        if (remaining <= 0) {
+            macroBarContainer.setBackgroundColor(Color.BLACK);
+            macroBarLine1.setTextColor(Color.WHITE);
+            macroBarLine2.setTextColor(Color.WHITE);
+            return;
+        }
+        boolean showWhite = remaining % 2 == 0;
+        macroBarContainer.setBackgroundColor(showWhite ? Color.WHITE : Color.BLACK);
+        macroBarLine1.setTextColor(showWhite ? Color.BLACK : Color.WHITE);
+        macroBarLine2.setTextColor(showWhite ? Color.BLACK : Color.WHITE);
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                doMacroFlash(remaining - 1);
+            }
+        }, 700);
+    }
+
     private void renderMacroBar() {
         String marketLabel = currentMarket == Market.US ? "[미국장]" : "[국내장]";
 
@@ -487,12 +515,12 @@ public class MainActivity extends Activity {
 
         StringBuilder line1 = new StringBuilder(marketLabel).append(" ");
         line1.append(usdKrwFresh
-                ? String.format(Locale.KOREA, "원/달러 %.2f", cachedUsdKrw)
+                ? String.format(Locale.KOREA, "원/달러 %,.2f", cachedUsdKrw)
                 : "원/달러 --");
         line1.append("   ");
         if (kospiFresh) {
             String sign = cachedKospiPct >= 0 ? "+" : "";
-            line1.append(String.format(Locale.KOREA, "코스피 %.2f (%s%.2f%%)", cachedKospi, sign, cachedKospiPct));
+            line1.append(String.format(Locale.KOREA, "코스피 %,.2f (%s%.2f%%)", cachedKospi, sign, cachedKospiPct));
         } else {
             line1.append("코스피 --");
         }

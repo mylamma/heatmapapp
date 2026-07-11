@@ -225,6 +225,14 @@ public class StockDetailActivity extends Activity {
         int buy, hold, sell, strongBuy, strongSell;
         boolean hasRecommendation = false;
         List<String> newsHeadlines = new ArrayList<>();
+
+        // ===== 국내 종목 전용 (네이버 integration API 기반) =====
+        double eps = Double.NaN, pbr = Double.NaN, bps = Double.NaN, dividendYield = Double.NaN;
+        String marketCapText = ""; // "1,666조 1,894억" 같은 단위가 섞인 문자열이라 그대로 표시
+        List<String> peerStocks = new ArrayList<>(); // 동종업계 종목 (이름 + 등락률)
+        List<String> reports = new ArrayList<>(); // 증권사 리포트 제목
+        double analystRecommMean = Double.NaN; // 1(적극매수)~5(매도) 평균 점수
+        String analystPriceTarget = ""; // 목표주가 평균 (문자열, 콤마 포함)
     }
 
     private class DetailFetchTask extends AsyncTask<Void, DetailData, DetailData> {
@@ -356,6 +364,52 @@ public class StockDetailActivity extends Activity {
                 }
                 d.week52High = parseNum(info.get("highPriceOf52Weeks"));
                 d.week52Low = parseNum(info.get("lowPriceOf52Weeks"));
+                d.eps = parseNum(info.get("eps"));
+                d.pbr = parseNum(info.get("pbr"));
+                d.bps = parseNum(info.get("bps"));
+                d.dividendYield = parseNum(info.get("dividendYieldRatio"));
+                if (info.containsKey("marketValue")) d.marketCapText = info.get("marketValue");
+
+                // 동종업계 종목 (회사개요 대체 - 산업분류명 자체는 이 API로는 못 가져옴)
+                JSONArray industryCompareInfo = integration.optJSONArray("industryCompareInfo");
+                if (industryCompareInfo != null) {
+                    for (int i = 0; i < Math.min(5, industryCompareInfo.length()); i++) {
+                        JSONObject peer = industryCompareInfo.optJSONObject(i);
+                        if (peer == null) continue;
+                        String name = peer.optString("stockName", "");
+                        double pct = parseNum(peer.optString("fluctuationsRatio", null));
+                        if (!name.isEmpty()) {
+                            String sign = (!Double.isNaN(pct) && pct >= 0) ? "+" : "";
+                            String pctText = Double.isNaN(pct) ? "" : String.format(Locale.US, " %s%.2f%%", sign, pct);
+                            d.peerStocks.add(name + pctText);
+                        }
+                    }
+                }
+
+                // 증권사 리포트 (관련 뉴스 대체)
+                JSONArray researches = integration.optJSONArray("researches");
+                if (researches != null) {
+                    for (int i = 0; i < Math.min(3, researches.length()); i++) {
+                        JSONObject r = researches.optJSONObject(i);
+                        if (r == null) continue;
+                        String tit = r.optString("tit", "");
+                        String bnm = r.optString("bnm", "");
+                        String wdt = r.optString("wdt", "");
+                        String dateText = wdt.length() == 8
+                                ? wdt.substring(0, 4) + "." + wdt.substring(4, 6) + "." + wdt.substring(6, 8)
+                                : wdt;
+                        if (!tit.isEmpty()) {
+                            d.reports.add(tit + " · " + bnm + " · " + dateText);
+                        }
+                    }
+                }
+
+                // 애널리스트 컨센서스 (매수/보유/매도 비율이 아니라 평균 점수+목표주가 형태로 제공됨)
+                JSONObject consensus = integration.optJSONObject("consensusInfo");
+                if (consensus != null) {
+                    d.analystRecommMean = parseNum(consensus.optString("recommMean", null));
+                    d.analystPriceTarget = consensus.optString("priceTargetMean", "");
+                }
             }
 
             return d;
@@ -420,7 +474,7 @@ public class StockDetailActivity extends Activity {
         if (!Double.isNaN(d.current)) {
             priceView.setText(isKorean
                     ? String.format(Locale.KOREA, "₩%,.0f", d.current)
-                    : String.format(Locale.US, "$%.2f", d.current));
+                    : String.format(Locale.US, "$%,.2f", d.current));
         }
         if (!Double.isNaN(d.current) && !Double.isNaN(d.prevClose) && d.prevClose != 0) {
             double pct = ((d.current - d.prevClose) / d.prevClose) * 100.0;
@@ -432,7 +486,7 @@ public class StockDetailActivity extends Activity {
             ohlView.setText(String.format(Locale.KOREA, "당일 시가 ₩%,.0f  고가 ₩%,.0f  저가 ₩%,.0f",
                     d.open, d.high, d.low));
         } else {
-            ohlView.setText(String.format(Locale.US, "당일 시가 %.2f  고가 %.2f  저가 %.2f",
+            ohlView.setText(String.format(Locale.US, "당일 시가 %,.2f  고가 %,.2f  저가 %,.2f",
                     d.open, d.high, d.low));
         }
         if (!d.companyName.isEmpty() && !displayName.equals(d.companyName)) {
@@ -450,7 +504,7 @@ public class StockDetailActivity extends Activity {
         if (!Double.isNaN(d.current)) {
             priceView.setText(isKorean
                     ? String.format(Locale.KOREA, "₩%,.0f", d.current)
-                    : String.format(Locale.US, "$%.2f", d.current));
+                    : String.format(Locale.US, "$%,.2f", d.current));
         }
         if (!Double.isNaN(d.current) && !Double.isNaN(d.prevClose) && d.prevClose != 0) {
             double pct = ((d.current - d.prevClose) / d.prevClose) * 100.0;
@@ -463,42 +517,93 @@ public class StockDetailActivity extends Activity {
             ohlView.setText(String.format(Locale.KOREA, "당일 시가 ₩%,.0f  고가 ₩%,.0f  저가 ₩%,.0f",
                     d.open, d.high, d.low));
         } else {
-            ohlView.setText(String.format(Locale.US, "당일 시가 %.2f  고가 %.2f  저가 %.2f",
+            ohlView.setText(String.format(Locale.US, "당일 시가 %,.2f  고가 %,.2f  저가 %,.2f",
                     d.open, d.high, d.low));
         }
 
-        StringBuilder overview = new StringBuilder("회사 개요\n");
-        overview.append("산업: ").append(d.industry.isEmpty() ? "정보 없음" : d.industry).append("\n");
-        overview.append(d.website.isEmpty() ? "웹사이트 정보 없음" : d.website);
-        overviewView.setText(overview.toString());
+        if (isKorean) {
+            // 국내 종목: "회사 개요" 대신 동종업계 종목 (네이버 API가 산업분류명/웹사이트는 안 주고
+            // 같은 업종의 다른 종목 목록만 제공해서, 그걸 활용함)
+            StringBuilder overview = new StringBuilder("동종업계 종목\n");
+            if (d.peerStocks.isEmpty()) {
+                overview.append("정보 없음");
+            } else {
+                for (String peer : d.peerStocks) overview.append(peer).append("\n");
+            }
+            overviewView.setText(overview.toString().trim());
+        } else {
+            StringBuilder overview = new StringBuilder("회사 개요\n");
+            overview.append("산업: ").append(d.industry.isEmpty() ? "정보 없음" : d.industry).append("\n");
+            overview.append(d.website.isEmpty() ? "웹사이트 정보 없음" : d.website);
+            overviewView.setText(overview.toString());
+        }
 
         StringBuilder metricText = new StringBuilder("재무지표\n");
         metricText.append(d.peIsForward ? "PER(선행): " : "PER(trailing): ")
-                .append(Double.isNaN(d.pe) ? "--" : String.format(Locale.US, "%.1f", d.pe)).append("\n");
-        metricText.append("52주 최고/최저: ")
-                .append(Double.isNaN(d.week52High) ? "--" : String.format(Locale.US, "%.2f", d.week52High))
-                .append(" / ")
-                .append(Double.isNaN(d.week52Low) ? "--" : String.format(Locale.US, "%.2f", d.week52Low));
+                .append(Double.isNaN(d.pe) ? "--" : String.format(Locale.US, "%,.1f", d.pe)).append("\n");
+        if (isKorean) {
+            metricText.append("EPS: ").append(Double.isNaN(d.eps) ? "--" : String.format(Locale.US, "%,.0f원", d.eps)).append("\n");
+            metricText.append("PBR: ").append(Double.isNaN(d.pbr) ? "--" : String.format(Locale.US, "%,.2f", d.pbr)).append("\n");
+            metricText.append("BPS: ").append(Double.isNaN(d.bps) ? "--" : String.format(Locale.US, "%,.0f원", d.bps)).append("\n");
+            metricText.append("배당수익률: ").append(Double.isNaN(d.dividendYield) ? "--" : String.format(Locale.US, "%.2f%%", d.dividendYield)).append("\n");
+            metricText.append("시가총액: ").append(d.marketCapText.isEmpty() ? "--" : d.marketCapText).append("\n");
+            metricText.append("52주 최고/최저: ")
+                    .append(Double.isNaN(d.week52High) ? "--" : String.format(Locale.US, "₩%,.0f", d.week52High))
+                    .append(" / ")
+                    .append(Double.isNaN(d.week52Low) ? "--" : String.format(Locale.US, "₩%,.0f", d.week52Low));
+        } else {
+            metricText.append("52주 최고/최저: ")
+                    .append(Double.isNaN(d.week52High) ? "--" : String.format(Locale.US, "%,.2f", d.week52High))
+                    .append(" / ")
+                    .append(Double.isNaN(d.week52Low) ? "--" : String.format(Locale.US, "%,.2f", d.week52Low));
+        }
         metricView.setText(metricText.toString());
 
-        if (d.newsHeadlines.isEmpty()) {
-            newsView.setText("관련 뉴스: 최근 7일간 뉴스 없음");
-        } else {
-            StringBuilder newsText = new StringBuilder("관련 뉴스 (최근 7일)\n");
-            for (String headline : d.newsHeadlines) {
-                newsText.append("· ").append(headline).append("\n");
+        if (isKorean) {
+            // 국내 종목: "관련 뉴스" 대신 증권사 리포트 (네이버 API가 뉴스 헤드라인은 안 주고
+            // 증권사 리포트 제목/작성사/날짜를 제공해서, 그걸 활용함)
+            if (d.reports.isEmpty()) {
+                newsView.setText("증권사 리포트: 정보 없음");
+            } else {
+                StringBuilder reportText = new StringBuilder("증권사 리포트\n");
+                for (String report : d.reports) reportText.append("· ").append(report).append("\n");
+                newsView.setText(reportText.toString().trim());
             }
-            newsView.setText(newsText.toString().trim());
+        } else {
+            if (d.newsHeadlines.isEmpty()) {
+                newsView.setText("관련 뉴스: 최근 7일간 뉴스 없음");
+            } else {
+                StringBuilder newsText = new StringBuilder("관련 뉴스 (최근 7일)\n");
+                for (String headline : d.newsHeadlines) {
+                    newsText.append("· ").append(headline).append("\n");
+                }
+                newsView.setText(newsText.toString().trim());
+            }
         }
 
-        if (d.hasRecommendation) {
-            int totalBuy = d.buy + d.strongBuy;
-            int total = totalBuy + d.hold + d.sell + d.strongSell;
-            recommendationLabel.setText(String.format(Locale.KOREA,
-                    "애널리스트 의견 (표본 %d명)", total));
-            recommendationBar.setData(totalBuy, d.hold, d.sell + d.strongSell);
+        if (isKorean) {
+            // 국내 종목은 매수/보유/매도 비율이 아니라 "평균 점수 + 목표주가" 형태로 제공되어
+            // 막대그래프 대신 텍스트로 표시 (막대는 숨김)
+            recommendationBar.setVisibility(View.GONE);
+            if (!Double.isNaN(d.analystRecommMean)) {
+                String targetText = d.analystPriceTarget.isEmpty() ? "--" : d.analystPriceTarget + "원";
+                recommendationLabel.setText(String.format(Locale.KOREA,
+                        "애널리스트 평균 의견 %.2f (1=적극매수~5=매도) · 목표주가 평균 %s",
+                        d.analystRecommMean, targetText));
+            } else {
+                recommendationLabel.setText("애널리스트 의견: 데이터 없음");
+            }
         } else {
-            recommendationLabel.setText("애널리스트 의견: 데이터 없음");
+            recommendationBar.setVisibility(View.VISIBLE);
+            if (d.hasRecommendation) {
+                int totalBuy = d.buy + d.strongBuy;
+                int total = totalBuy + d.hold + d.sell + d.strongSell;
+                recommendationLabel.setText(String.format(Locale.KOREA,
+                        "애널리스트 의견 (표본 %d명)", total));
+                recommendationBar.setData(totalBuy, d.hold, d.sell + d.strongSell);
+            } else {
+                recommendationLabel.setText("애널리스트 의견: 데이터 없음");
+            }
         }
 
         List<double[]> history = PriceHistory.getHistory(StockDetailActivity.this, symbol);
