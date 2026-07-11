@@ -1,0 +1,42 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.example.heatmap'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.heatmap"
+        minSdkVersion 17
+        targetSdkVersion 17
+        versionCode 1
+        versionName "1.0"
+
+        // GitHub Actions Secret(FINNHUB_API_KEY)에서 값을 읽어와 빌드 시점에 코드에 주입.
+        // 로컬에서 빌드할 땐 환경변수가 없으므로 빈 문자열이 들어감.
+        String finnhubKey = System.getenv("FINNHUB_API_KEY") ?: ""
+        buildConfigField "String", "FINNHUB_API_KEY", "\"${finnhubKey}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+dependencies {
+    // 외부 라이브러리 없이 순수 안드로이드 API만 사용 (경량화)
+}
