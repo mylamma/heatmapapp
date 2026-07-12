@@ -34,13 +34,13 @@ import java.util.Map;
  */
 public class MainActivity extends Activity {
 
-    private static final int KR_MARKET_START_HOUR = 7;  // 07:00부터
-    private static final int KR_MARKET_END_HOUR = 19;    // 18:59까지 (19:00 미만)
+    static final int KR_MARKET_START_HOUR = 7;  // 07:00부터
+    static final int KR_MARKET_END_HOUR = 19;    // 18:59까지 (19:00 미만)
 
-    private enum Market { US, KR }
+    enum Market { US, KR }
 
     // ===== 미국장: 섹터 + 종목 + 상대적 시가총액 비중(근사치) =====
-    private static final TreemapView.Sector[] SECTORS_US = new TreemapView.Sector[]{
+    static final TreemapView.Sector[] SECTORS_US = new TreemapView.Sector[]{
             new TreemapView.Sector("기술", new TreemapView.Stock[]{
                     new TreemapView.Stock("AAPL", 3500),
                     new TreemapView.Stock("MSFT", 3200),
@@ -110,7 +110,7 @@ public class MainActivity extends Activity {
     };
 
     // ===== 국내장(KOSPI): 섹터 + 종목코드 + 한글 표시명 + 상대적 시가총액 비중(근사치) =====
-    private static final TreemapView.Sector[] SECTORS_KR = new TreemapView.Sector[]{
+    static final TreemapView.Sector[] SECTORS_KR = new TreemapView.Sector[]{
             new TreemapView.Sector("반도체/IT", new TreemapView.Stock[]{
                     new TreemapView.Stock("005930", "삼성전자", 400),
                     new TreemapView.Stock("000660", "SK하이닉스", 140),
@@ -254,6 +254,10 @@ public class MainActivity extends Activity {
             runFetchCycle(true, true);
             scheduleNextHourlyTick();
 
+            // 앱이 나중에 종료/프로세스 정리되어도 정각 갱신이 끊기지 않도록
+            // 시스템 AlarmManager에도 동일하게 예약해둠 (이중 안전장치)
+            HourlyUpdateReceiver.scheduleNextHourlyAlarm(this);
+
         } catch (Throwable t) {
             showErrorScreen(t);
         }
@@ -356,8 +360,14 @@ public class MainActivity extends Activity {
             public void onWifiReady() {
                 pendingFetchCount = (includeStock ? 1 : 0) + (includeMacro ? 1 : 0);
                 if (pendingFetchCount == 0) return;
-                if (includeStock) new StockFetchTask().execute();
-                if (includeMacro) new MacroFetchTask().execute();
+                // execute()만 쓰면 안드로이드 기본값(SERIAL_EXECUTOR)이 적용되어 두 작업이
+                // 동시가 아니라 순서대로 실행되어 버림 -> THREAD_POOL_EXECUTOR로 진짜 병렬 실행시킴
+                if (includeStock) {
+                    new StockFetchTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                }
+                if (includeMacro) {
+                    new MacroFetchTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                }
             }
         });
     }
@@ -391,23 +401,20 @@ public class MainActivity extends Activity {
             Canvas canvas = new Canvas(rawBitmap);
             root.draw(canvas);
 
-            File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
-            if (!sleepDir.exists()) {
-                sleepDir.mkdirs();
-            }
-
-            // 기기가 슬립화면 표시할 때 방향을 자체 보정하는지 아닌지 확실치 않아서,
-            // 정방향/180도 회전 두 버전을 다 저장함. 설정에서 미리보기를 보고
-            // 실제로 똑바로 나오는 쪽 파일을 슬립 화면으로 선택하면 됨.
-            saveBitmapAs(rawBitmap, new File(sleepDir, "heatmap_sleep_normal.png"));
-
+            // 화면을 180도 뒤집어서(reversePortrait) 쓰고 계셔서, 캡처한 이미지도 180도 회전시켜야
+            // 실제 슬립화면에서 보는 방향과 일치함 (실제 기기 테스트로 확인 완료)
             android.graphics.Matrix matrix = new android.graphics.Matrix();
             matrix.postRotate(180);
             Bitmap rotatedBitmap = Bitmap.createBitmap(
                     rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
-            saveBitmapAs(rotatedBitmap, new File(sleepDir, "heatmap_sleep_rotated.png"));
-
             rawBitmap.recycle();
+
+            File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
+            if (!sleepDir.exists()) {
+                sleepDir.mkdirs();
+            }
+            // 기존에 설정에서 이미 선택해두신 파일명을 그대로 유지 (재선택 안 해도 되게)
+            saveBitmapAs(rotatedBitmap, new File(sleepDir, "heatmap_sleep_rotated.png"));
             rotatedBitmap.recycle();
         } catch (Exception ignored) {
             // 저장 실패해도 앱 동작에는 영향 없음 (슬립화면 갱신만 안 될 뿐)
@@ -670,13 +677,13 @@ public class MainActivity extends Activity {
     }
 
     // BTC/USDT, ETH/USDT 등 단순 현재가만 필요한 심볼(암호화폐 등) 조회용
-    private double fetchSimplePrice(String symbol) {
+    static double fetchSimplePrice(String symbol) {
         JSONObject json = fetchQuoteJson(symbol);
         if (json == null) return Double.NaN;
         return json.optDouble("c", Double.NaN);
     }
 
-    private JSONObject fetchQuoteJson(String symbol) {
+    static JSONObject fetchQuoteJson(String symbol) {
         String body = NetUtil.httpGet(
                 "https://finnhub.io/api/v1/quote?symbol=" + symbol + "&token=" + BuildConfig.FINNHUB_API_KEY);
         if (body == null) return null;
@@ -687,7 +694,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private double fetchUsdKrw() {
+    static double fetchUsdKrw() {
         // 무료/무키/표준 JSON 환율 API를 프록시 경유로 사용 (Finnhub forex보다 안정적으로 확인됨)
         String body = NetUtil.proxyGet("https://open.er-api.com/v6/latest/USD");
         if (body == null) return Double.NaN;
@@ -701,7 +708,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private double[] fetchKospi() {
+    static double[] fetchKospi() {
         // 참고: 코스피는 Finnhub 무료 플랜에서 지원하지 않아 네이버 금융의 비공식 공개 API를 사용함.
         return fetchNaverIndex("https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI");
     }
@@ -712,7 +719,7 @@ public class MainActivity extends Activity {
      * 오래전부터 널리 쓰여온 야후 파이낸스의 공개 차트 API(프록시 경유)로 교체함.
      * 반환값: [현재 지수/수치, 등락률(%)]
      */
-    private double[] fetchWorldIndex(String yahooSymbol) {
+    static double[] fetchWorldIndex(String yahooSymbol) {
         String body = NetUtil.proxyGet("https://query1.finance.yahoo.com/v8/finance/chart/" + yahooSymbol);
         if (body == null) return new double[]{Double.NaN, Double.NaN};
         try {
@@ -734,7 +741,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private double[] fetchNaverIndex(String url) {
+    static double[] fetchNaverIndex(String url) {
         String body = NetUtil.proxyGet(url);
         if (body == null) return new double[]{Double.NaN, Double.NaN};
         try {
@@ -753,7 +760,7 @@ public class MainActivity extends Activity {
      * 꽤 느려서, 동시에 최대 8개까지 병렬로 요청하도록 개선함 (서버 부담과 속도의 절충점).
      * 반환값: 종목코드 -> [현재가, 등락률(%)]
      */
-    private Map<String, double[]> fetchKoreanBatch(java.util.List<String> codes) {
+    static Map<String, double[]> fetchKoreanBatch(java.util.List<String> codes) {
         final Map<String, double[]> result = new java.util.concurrent.ConcurrentHashMap<>();
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(8);
         java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
@@ -788,7 +795,7 @@ public class MainActivity extends Activity {
         return result;
     }
 
-    private double parseNaverNumber(String raw) {
+    static double parseNaverNumber(String raw) {
         if (raw == null || raw.isEmpty()) return Double.NaN;
         try {
             return Double.parseDouble(raw.replace(",", "").trim());

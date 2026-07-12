@@ -13,7 +13,7 @@ import android.os.Handler;
  */
 public class WifiPowerManager {
 
-    private static final long WIFI_ON_WAIT_MS = 3000; // Wi-Fi가 켜지고 연결될 시간을 잠깐 기다림
+    private static final long WIFI_ON_WAIT_MS = 15000; // Wi-Fi가 켜지고 연결될 시간을 기다림
     private static final long WIFI_OFF_DELAY_MS = 20000; // 마지막 요청 후 20초 뒤 자동으로 끔 (연속 조작 대비)
 
     private final Context appContext;
