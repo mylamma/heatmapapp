@@ -37,6 +37,15 @@ import java.util.Map;
  */
 public class StockDetailActivity extends Activity {
 
+    private static final long INACTIVITY_TIMEOUT_MS = 3 * 60 * 1000L; // 3분간 조작 없으면 메인 화면으로 복귀
+    private final android.os.Handler inactivityHandler = new android.os.Handler();
+    private final Runnable inactivityReturnRunnable = new Runnable() {
+        @Override
+        public void run() {
+            finish(); // 메인 히트맵 화면으로 복귀 (거기서 3분 더 방치되면 캡처 후 슬립 전환됨)
+        }
+    };
+
     private String symbol;
     private String displayName;
     private boolean isKorean;
@@ -58,7 +67,8 @@ public class StockDetailActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         try {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            // 예전엔 여기 FLAG_KEEP_SCREEN_ON이 있었는데, 이게 슬립화면 전환 자체를
+            // 막아버리는 원인이었어서 제거함 (메인화면과 동일하게 절전을 따르도록)
             symbol = getIntent().getStringExtra("symbol");
             if (symbol == null) symbol = "";
             displayName = getIntent().getStringExtra("displayName");
@@ -79,6 +89,29 @@ public class StockDetailActivity extends Activity {
         } catch (Throwable t) {
             showErrorScreen(t);
         }
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        resetInactivityTimer();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resetInactivityTimer();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        inactivityHandler.removeCallbacks(inactivityReturnRunnable);
+    }
+
+    private void resetInactivityTimer() {
+        inactivityHandler.removeCallbacks(inactivityReturnRunnable);
+        inactivityHandler.postDelayed(inactivityReturnRunnable, INACTIVITY_TIMEOUT_MS);
     }
 
     private void showErrorScreen(Throwable t) {

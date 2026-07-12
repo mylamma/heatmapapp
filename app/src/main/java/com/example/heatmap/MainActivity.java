@@ -283,6 +283,20 @@ public class MainActivity extends Activity {
         resetInactivityTimer();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 상세화면 등 다른 화면에 있다가 이 화면으로 돌아왔을 때 3분 타이머를 새로 시작
+        resetInactivityTimer();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 이 화면이 전면이 아닐 때는(예: 상세화면 보는 중) 여기서 타이머가 잘못 발동하지 않도록 정지
+        handler.removeCallbacks(inactivitySleepRunnable);
+    }
+
     private void resetInactivityTimer() {
         handler.removeCallbacks(inactivitySleepRunnable);
         handler.postDelayed(inactivitySleepRunnable, INACTIVITY_SLEEP_MS);
@@ -363,7 +377,8 @@ public class MainActivity extends Activity {
         treemapView.refreshChanges(); // e-ink 잔상 제거 플래시
         flashMacroBar();
         runFetchCycle(true, true);
-        Toast.makeText(this, "새로고침 중...", Toast.LENGTH_SHORT).show();
+        // 참고: 예전엔 여기서 "새로고침 중..." 토스트를 띄웠는데, 토스트는 우리 화면
+        // 그리기/플래시 로직 바깥의 별도 시스템 창이라 e-ink에서 잔상으로 남는 문제가 있어 제거함
     }
 
     /**
