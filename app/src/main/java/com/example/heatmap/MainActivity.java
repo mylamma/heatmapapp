@@ -2,9 +2,12 @@ package com.example.heatmap;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.view.KeyEvent;
 import android.view.WindowManager;
@@ -15,6 +18,8 @@ import android.widget.Toast;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -174,20 +179,25 @@ public class MainActivity extends Activity {
     };
 
     private TreemapView treemapView;
+    private LinearLayout root;
     private LinearLayout macroBarContainer;
     private TextView macroBarLine1;
     private TextView macroBarLine2;
     private final Handler handler = new Handler();
     private Runnable refreshTask;
     private Market currentMarket = Market.US;
+    private WifiPowerManager wifiPowerManager;
+    private int pendingFetchCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         try {
-            // 화면 항시 켜기 + 상태바 최소화로 화면 전체 활용
+            // 화면 항시 켜기(크레마 자체 슬립화면으로 안 바뀌게) + 상태바 최소화로 화면 전체 활용
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+            wifiPowerManager = new WifiPowerManager(this);
 
             // 구형 안드로이드 HTTPS(TLS1.1/1.2) 호환 처리
             try {
@@ -195,7 +205,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
 
-            LinearLayout root = new LinearLayout(this);
+            root = new LinearLayout(this);
             root.setOrientation(LinearLayout.VERTICAL);
 
             macroBarContainer = new LinearLayout(this);
@@ -239,8 +249,7 @@ public class MainActivity extends Activity {
             refreshTask = new Runnable() {
                 @Override
                 public void run() {
-                    new StockFetchTask().execute();
-                    new MacroFetchTask().execute();
+                    runFetchCycle(true, true);
                     handler.postDelayed(this, REFRESH_INTERVAL_MS);
                 }
             };
@@ -288,16 +297,76 @@ public class MainActivity extends Activity {
         treemapView.refreshChanges(); // 캐시된 마지막 값으로 즉시 표시 + e-ink 잔상 제거 플래시
         flashMacroBar();
         renderMacroBar(); // 시장 라벨만 갱신, 환율/지수 값은 그대로 유지 (재조회 불필요)
-        new StockFetchTask().execute();
+        runFetchCycle(true, false);
     }
 
     /** 오른쪽 버튼: 1시간 자동 주기와 별개로 즉시 최신 정보를 불러옴 */
     private void manualRefresh() {
         treemapView.refreshChanges(); // e-ink 잔상 제거 플래시
         flashMacroBar();
-        new StockFetchTask().execute();
-        new MacroFetchTask().execute();
+        runFetchCycle(true, true);
         Toast.makeText(this, "새로고침 중...", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * 배터리 절약용 갱신 흐름: Wi-Fi를 켜고(꺼져 있었다면) 잠깐 기다린 뒤 필요한 조회를 실행하고,
+     * 전부 끝나면 자동으로 다시 Wi-Fi를 끔.
+     */
+    private void runFetchCycle(final boolean includeStock, final boolean includeMacro) {
+        wifiPowerManager.ensureOnThen(new WifiPowerManager.OnWifiReadyListener() {
+            @Override
+            public void onWifiReady() {
+                pendingFetchCount = (includeStock ? 1 : 0) + (includeMacro ? 1 : 0);
+                if (pendingFetchCount == 0) return;
+                if (includeStock) new StockFetchTask().execute();
+                if (includeMacro) new MacroFetchTask().execute();
+            }
+        });
+    }
+
+    /** 조회 작업(주식/환율지수) 하나가 끝날 때마다 호출 - 전부 끝나면 Wi-Fi를 다시 끄도록 예약 */
+    private void onFetchTaskDone() {
+        pendingFetchCount--;
+        if (pendingFetchCount <= 0) {
+            wifiPowerManager.scheduleOff();
+            // 화면이 최종 상태로 다시 그려질 시간을 살짝 준 뒤 캡처 (플래시 애니메이션 끝나고 나서)
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    saveScreenshotToSleepFolder();
+                }
+            }, 2000);
+        }
+    }
+
+    /**
+     * 현재 화면을 캡처해서 기기의 "sleep" 폴더에 저장 (크레마의 슬립화면 커스텀 이미지 기능 활용).
+     * 최초 1회, 기기 설정에서 이 파일을 슬립 화면으로 지정해두면 - 이 파일이 갱신될 때마다
+     * 슬립 화면도 최신 상태로 보이길 기대하는 실험적 기능 (기기가 선택 시점에 복사해두는
+     * 방식이면 매번 다시 지정해야 할 수도 있음 - 실제로 확인이 필요함).
+     */
+    private void saveScreenshotToSleepFolder() {
+        try {
+            if (root.getWidth() <= 0 || root.getHeight() <= 0) return;
+
+            Bitmap bitmap = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            root.draw(canvas);
+
+            File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
+            if (!sleepDir.exists()) {
+                sleepDir.mkdirs();
+            }
+            File outFile = new File(sleepDir, "heatmap_sleep.png");
+
+            FileOutputStream out = new FileOutputStream(outFile);
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+            out.flush();
+            out.close();
+            bitmap.recycle();
+        } catch (Exception ignored) {
+            // 저장 실패해도 앱 동작에는 영향 없음 (슬립화면 갱신만 안 될 뿐)
+        }
     }
 
     private void showErrorScreen(Throwable t) {
@@ -390,6 +459,7 @@ public class MainActivity extends Activity {
         protected void onPostExecute(Void result) {
             treemapView.refreshChanges();
             flashMacroBar();
+            onFetchTaskDone();
         }
     }
 
@@ -478,6 +548,7 @@ public class MainActivity extends Activity {
             if (!Double.isNaN(macro.vixValue)) { cachedVixValue = macro.vixValue; cachedVixPct = macro.vixChangePct; cachedVixTime = now; }
 
             renderMacroBar();
+            onFetchTaskDone();
         }
     }
 

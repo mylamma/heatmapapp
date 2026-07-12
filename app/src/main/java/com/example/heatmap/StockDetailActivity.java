@@ -67,7 +67,14 @@ public class StockDetailActivity extends Activity {
             isKorean = "KR".equals(market);
 
             setContentView(buildLayout());
-            new DetailFetchTask().execute();
+
+            final WifiPowerManager wifiPowerManager = new WifiPowerManager(this);
+            wifiPowerManager.ensureOnThen(new WifiPowerManager.OnWifiReadyListener() {
+                @Override
+                public void onWifiReady() {
+                    new DetailFetchTask(wifiPowerManager).execute();
+                }
+            });
 
         } catch (Throwable t) {
             showErrorScreen(t);
@@ -236,6 +243,12 @@ public class StockDetailActivity extends Activity {
     }
 
     private class DetailFetchTask extends AsyncTask<Void, DetailData, DetailData> {
+        private final WifiPowerManager wifiPowerManager;
+
+        DetailFetchTask(WifiPowerManager wifiPowerManager) {
+            this.wifiPowerManager = wifiPowerManager;
+        }
+
         @Override
         protected DetailData doInBackground(Void... voids) {
             return isKorean ? fetchKoreanDetail() : fetchUsDetail();
@@ -427,6 +440,7 @@ public class StockDetailActivity extends Activity {
         @Override
         protected void onPostExecute(DetailData d) {
             applyData(d);
+            wifiPowerManager.scheduleOff();
         }
     }
 
