@@ -193,8 +193,9 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         try {
-            // 화면 항시 켜기(크레마 자체 슬립화면으로 안 바뀌게) + 상태바 최소화로 화면 전체 활용
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            // 슬립화면 연동이 확인되어 화면을 억지로 켜둘 필요가 없어짐 ->
+            // 기기 자체 화면 꺼짐 시간(설정)에 맞춰 자동으로 절전에 들어가도록 둠.
+            // (필요하면 FLAG_KEEP_SCREEN_ON을 다시 추가할 수 있음)
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
             wifiPowerManager = new WifiPowerManager(this);
@@ -349,9 +350,17 @@ public class MainActivity extends Activity {
         try {
             if (root.getWidth() <= 0 || root.getHeight() <= 0) return;
 
-            Bitmap bitmap = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(bitmap);
+            Bitmap rawBitmap = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(rawBitmap);
             root.draw(canvas);
+
+            // 화면을 180도 뒤집어서(reversePortrait) 쓰고 계셔서, 캡처한 이미지도 180도 회전시켜야
+            // 실제로 보고 계신 방향과 슬립화면이 일치함
+            android.graphics.Matrix matrix = new android.graphics.Matrix();
+            matrix.postRotate(180);
+            Bitmap rotatedBitmap = Bitmap.createBitmap(
+                    rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
+            rawBitmap.recycle();
 
             File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
             if (!sleepDir.exists()) {
@@ -360,10 +369,10 @@ public class MainActivity extends Activity {
             File outFile = new File(sleepDir, "heatmap_sleep.png");
 
             FileOutputStream out = new FileOutputStream(outFile);
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+            rotatedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
             out.flush();
             out.close();
-            bitmap.recycle();
+            rotatedBitmap.recycle();
         } catch (Exception ignored) {
             // 저장 실패해도 앱 동작에는 영향 없음 (슬립화면 갱신만 안 될 뿐)
         }
