@@ -34,7 +34,8 @@ import java.util.Map;
  */
 public class MainActivity extends Activity {
 
-    private static final long REFRESH_INTERVAL_MS = 60 * 60 * 1000L; // 1시간 (배터리 절약)
+    private static final int KR_MARKET_START_HOUR = 7;  // 07:00부터
+    private static final int KR_MARKET_END_HOUR = 19;    // 18:59까지 (19:00 미만)
 
     private enum Market { US, KR }
 
@@ -247,14 +248,11 @@ public class MainActivity extends Activity {
 
             setContentView(root);
 
-            refreshTask = new Runnable() {
-                @Override
-                public void run() {
-                    runFetchCycle(true, true);
-                    handler.postDelayed(this, REFRESH_INTERVAL_MS);
-                }
-            };
-            handler.post(refreshTask);
+            // 앱을 연 시점 기준으로 바로 시간대에 맞는 시장 선택 + 1회 즉시 갱신,
+            // 이후로는 매시 정각에 맞춰 자동 갱신 (07:00~18:59 한국장, 그 외 미국장)
+            autoSelectMarketByTime();
+            runFetchCycle(true, true);
+            scheduleNextHourlyTick();
 
         } catch (Throwable t) {
             showErrorScreen(t);
@@ -307,6 +305,45 @@ public class MainActivity extends Activity {
         flashMacroBar();
         runFetchCycle(true, true);
         Toast.makeText(this, "새로고침 중...", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * 매시 정각(예: 1:00, 2:00...)에 맞춰 자동 갱신을 예약.
+     * 매번 "다음 정각까지 남은 시간"을 다시 계산해서 예약하기 때문에, 처리 지연이 누적되어도
+     * 시간이 밀리지 않고 항상 정확한 정각에 실행됨.
+     */
+    private void scheduleNextHourlyTick() {
+        long delay = millisUntilNextHour();
+        refreshTask = new Runnable() {
+            @Override
+            public void run() {
+                autoSelectMarketByTime();
+                runFetchCycle(true, true);
+                scheduleNextHourlyTick();
+            }
+        };
+        handler.postDelayed(refreshTask, delay);
+    }
+
+    private long millisUntilNextHour() {
+        java.util.Calendar cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Seoul"));
+        long now = cal.getTimeInMillis();
+        cal.set(java.util.Calendar.MINUTE, 0);
+        cal.set(java.util.Calendar.SECOND, 0);
+        cal.set(java.util.Calendar.MILLISECOND, 0);
+        cal.add(java.util.Calendar.HOUR_OF_DAY, 1);
+        return cal.getTimeInMillis() - now;
+    }
+
+    /** 오전 7시~오후 6시59분(한국시간)은 한국장, 그 외 시간은 미국장을 자동으로 선택 */
+    private void autoSelectMarketByTime() {
+        java.util.Calendar cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Seoul"));
+        int hour = cal.get(java.util.Calendar.HOUR_OF_DAY);
+        Market target = (hour >= KR_MARKET_START_HOUR && hour < KR_MARKET_END_HOUR) ? Market.KR : Market.US;
+        if (currentMarket != target) {
+            currentMarket = target;
+            treemapView.setSectors(currentMarket == Market.US ? SECTORS_US : SECTORS_KR);
+        }
     }
 
     /**
