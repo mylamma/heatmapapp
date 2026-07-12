@@ -9,16 +9,13 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
-    <!-- 슬립 화면(sleep 폴더) 이미지 저장을 위한 저장소 권한 -->
+    <!-- 슬립 화면(sleep 폴더) 이미지 저장을 위한 저장소 권한 (캡처 코드 자체는 남겨둠) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <!-- 앱이 꺼져 있어도 매시 정각에 깨어나 갱신하기 위한 권한 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- 3분간 조작 없을 때 강제로 화면을 끄기 위한 권한 (화면 꺼짐 시간 임시 변경) -->
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
     <application
         android:allowBackup="true"

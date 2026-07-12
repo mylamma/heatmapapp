@@ -14,6 +14,7 @@ import java.util.TimeZone;
  * AlarmManager가 매시 정각에 깨우는 리시버.
  * MainActivity(앱 화면)가 실행 중이 아니어도(프로세스가 종료돼 있어도) 안드로이드가
  * 이 리시버를 대신 깨워서 실행시켜주기 때문에, 오래 잠들어 있어도 정각 갱신이 안 끊김.
+ * (참고: 화면은 이제 항상 켜둔 채로 운영하므로, 여기서는 데이터만 갱신함)
  */
 public class HourlyUpdateReceiver extends BroadcastReceiver {
 
