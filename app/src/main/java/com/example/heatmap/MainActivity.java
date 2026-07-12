@@ -9,6 +9,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
@@ -36,6 +37,8 @@ public class MainActivity extends Activity {
 
     static final int KR_MARKET_START_HOUR = 7;  // 07:00부터
     static final int KR_MARKET_END_HOUR = 19;    // 18:59까지 (19:00 미만)
+    private static final long INACTIVITY_SLEEP_MS = 3 * 60 * 1000L; // 3분간 조작 없으면 자동 슬립
+    private static final int TEMP_SCREEN_TIMEOUT_MS = 500; // 강제로 화면을 끄기 위해 순간적으로 줄이는 값
 
     enum Market { US, KR }
 
@@ -190,6 +193,14 @@ public class MainActivity extends Activity {
     private WifiPowerManager wifiPowerManager;
     private int pendingFetchCount = 0;
 
+    // 3분간 조작이 없으면 자동으로 화면을 캡처해서 저장한 뒤 슬립 모드로 전환
+    private final Runnable inactivitySleepRunnable = new Runnable() {
+        @Override
+        public void run() {
+            goToSleepNow();
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -258,8 +269,52 @@ public class MainActivity extends Activity {
             // 시스템 AlarmManager에도 동일하게 예약해둠 (이중 안전장치)
             HourlyUpdateReceiver.scheduleNextHourlyAlarm(this);
 
+            resetInactivityTimer();
+
         } catch (Throwable t) {
             showErrorScreen(t);
+        }
+    }
+
+    /** 터치든 버튼이든 어떤 사용자 조작이 있으면 안드로이드가 자동으로 호출해주는 콜백 */
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        resetInactivityTimer();
+    }
+
+    private void resetInactivityTimer() {
+        handler.removeCallbacks(inactivitySleepRunnable);
+        handler.postDelayed(inactivitySleepRunnable, INACTIVITY_SLEEP_MS);
+    }
+
+    /**
+     * 3분간 조작이 없을 때 호출됨: 지금 보고 있는 화면을 슬립화면으로 다시 한번 확실히
+     * 저장한 뒤, 화면 꺼짐 시간을 순간적으로 아주 짧게 바꿔서 강제로 화면을 끔
+     * (안드로이드는 앱이 화면을 즉시 끄는 표준 API가 없어서, 이 방식으로 우회함).
+     * 짧게 바꾼 값은 화면이 꺼진 직후 원래 설정값으로 복구함.
+     */
+    private void goToSleepNow() {
+        saveScreenshotToSleepFolder();
+
+        try {
+            final int originalTimeout = Settings.System.getInt(
+                    getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, 60000);
+            Settings.System.putInt(
+                    getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, TEMP_SCREEN_TIMEOUT_MS);
+
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Settings.System.putInt(
+                                getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, originalTimeout);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }, 1500);
+        } catch (Exception ignored) {
+            // 이 설정을 바꿀 권한/지원이 없는 기기라면 조용히 무시 (기기 자체 화면 꺼짐 시간을 따름)
         }
     }
 
@@ -447,6 +502,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacks(refreshTask);
+        handler.removeCallbacks(inactivitySleepRunnable);
         super.onDestroy();
     }
 
