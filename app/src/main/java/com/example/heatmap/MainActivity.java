@@ -312,32 +312,19 @@ public class MainActivity extends Activity {
         // 그리기/플래시 로직 바깥의 별도 시스템 창이라 e-ink에서 잔상으로 남는 문제가 있어 제거함
     }
 
-    /**
-     * 매시 정각(예: 1:00, 2:00...)에 맞춰 자동 갱신을 예약.
-     * 매번 "다음 정각까지 남은 시간"을 다시 계산해서 예약하기 때문에, 처리 지연이 누적되어도
-     * 시간이 밀리지 않고 항상 정확한 정각에 실행됨.
-     */
+    private static final long REFRESH_INTERVAL_MS = 60 * 1000L; // 1분마다 자동 갱신
+
+    /** 1분마다 자동 갱신 (시간대에 맞는 시장도 매번 다시 확인) */
     private void scheduleNextHourlyTick() {
-        long delay = millisUntilNextHour();
         refreshTask = new Runnable() {
             @Override
             public void run() {
                 autoSelectMarketByTime();
                 runFetchCycle(true, true);
-                scheduleNextHourlyTick();
+                handler.postDelayed(this, REFRESH_INTERVAL_MS);
             }
         };
-        handler.postDelayed(refreshTask, delay);
-    }
-
-    private long millisUntilNextHour() {
-        java.util.Calendar cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Seoul"));
-        long now = cal.getTimeInMillis();
-        cal.set(java.util.Calendar.MINUTE, 0);
-        cal.set(java.util.Calendar.SECOND, 0);
-        cal.set(java.util.Calendar.MILLISECOND, 0);
-        cal.add(java.util.Calendar.HOUR_OF_DAY, 1);
-        return cal.getTimeInMillis() - now;
+        handler.postDelayed(refreshTask, REFRESH_INTERVAL_MS);
     }
 
     /** 오전 7시~오후 6시59분(한국시간)은 한국장, 그 외 시간은 미국장을 자동으로 선택 */
