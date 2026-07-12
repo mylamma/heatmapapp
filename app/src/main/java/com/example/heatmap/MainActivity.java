@@ -391,28 +391,34 @@ public class MainActivity extends Activity {
             Canvas canvas = new Canvas(rawBitmap);
             root.draw(canvas);
 
-            // 화면을 180도 뒤집어서(reversePortrait) 쓰고 계셔서, 캡처한 이미지도 180도 회전시켜야
-            // 실제로 보고 계신 방향과 슬립화면이 일치함
-            android.graphics.Matrix matrix = new android.graphics.Matrix();
-            matrix.postRotate(0);
-            Bitmap rotatedBitmap = Bitmap.createBitmap(
-                    rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
-            rawBitmap.recycle();
-
             File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
             if (!sleepDir.exists()) {
                 sleepDir.mkdirs();
             }
-            File outFile = new File(sleepDir, "heatmap_sleep.png");
 
-            FileOutputStream out = new FileOutputStream(outFile);
-            rotatedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-            out.flush();
-            out.close();
+            // 기기가 슬립화면 표시할 때 방향을 자체 보정하는지 아닌지 확실치 않아서,
+            // 정방향/180도 회전 두 버전을 다 저장함. 설정에서 미리보기를 보고
+            // 실제로 똑바로 나오는 쪽 파일을 슬립 화면으로 선택하면 됨.
+            saveBitmapAs(rawBitmap, new File(sleepDir, "heatmap_sleep_normal.png"));
+
+            android.graphics.Matrix matrix = new android.graphics.Matrix();
+            matrix.postRotate(180);
+            Bitmap rotatedBitmap = Bitmap.createBitmap(
+                    rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
+            saveBitmapAs(rotatedBitmap, new File(sleepDir, "heatmap_sleep_rotated.png"));
+
+            rawBitmap.recycle();
             rotatedBitmap.recycle();
         } catch (Exception ignored) {
             // 저장 실패해도 앱 동작에는 영향 없음 (슬립화면 갱신만 안 될 뿐)
         }
+    }
+
+    private void saveBitmapAs(Bitmap bitmap, File outFile) throws Exception {
+        FileOutputStream out = new FileOutputStream(outFile);
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+        out.flush();
+        out.close();
     }
 
     private void showErrorScreen(Throwable t) {
