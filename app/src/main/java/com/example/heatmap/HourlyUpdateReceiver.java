@@ -8,15 +8,16 @@ import android.content.Intent;
 import android.os.PowerManager;
 
 /**
- * AlarmManager가 1분마다 깨우는 리시버.
- * MainActivity(앱 화면)가 실행 중이 아니어도(프로세스가 종료돼 있어도) 안드로이드가
- * 이 리시버를 대신 깨워서 실행시켜주기 때문에, 앱이 죽어도 갱신이 안 끊김.
- * (참고: 화면은 이제 항상 켜둔 채로 운영하므로, 여기서는 데이터만 갱신함)
+ * AlarmManager가 10분마다 깨우는 리시버.
+ * 화면이 계속 켜져 있는 동안은 MainActivity의 1분 타이머가 갱신을 담당하고,
+ * 이 리시버는 "혹시 앱이 죽었을 때"를 대비한 백업용으로 좀 더 뜸하게(10분) 동작함.
+ * (예전엔 이것도 1분으로 되어 있어서, 화면 타이머와 매분 겹쳐서 이중으로 조회하며
+ * 부하가 2배로 걸리고 있었음 - 발열/다운의 주요 원인 중 하나였음)
  */
 public class HourlyUpdateReceiver extends BroadcastReceiver {
 
     private static final int REQUEST_CODE = 1001;
-    private static final long REFRESH_INTERVAL_MS = 60 * 1000L; // 1분
+    private static final long REFRESH_INTERVAL_MS = 10 * 60 * 1000L; // 10분 (백업용, 메인 타이머와 안 겹치게)
 
     @Override
     public void onReceive(final Context context, Intent intent) {

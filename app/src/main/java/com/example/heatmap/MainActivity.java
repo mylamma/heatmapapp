@@ -189,6 +189,7 @@ public class MainActivity extends Activity {
     private Market currentMarket = Market.US;
     private WifiPowerManager wifiPowerManager;
     private int pendingFetchCount = 0;
+    private boolean isFetchCycleRunning = false; // 이전 사이클이 아직 진행 중인지 (겹침 방지)
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -341,13 +342,23 @@ public class MainActivity extends Activity {
     /**
      * 배터리 절약용 갱신 흐름: Wi-Fi를 켜고(꺼져 있었다면) 잠깐 기다린 뒤 필요한 조회를 실행하고,
      * 전부 끝나면 자동으로 다시 Wi-Fi를 끔.
+     * 이미 이전 사이클이 진행 중이면(느린 네트워크 등으로 1분을 넘긴 경우), 겹쳐서 또 시작하지
+     * 않고 이번 틱은 건너뜀 - 안 그러면 스레드/네트워크 연결이 계속 쌓여서 발열/다운의 원인이 됨.
      */
     private void runFetchCycle(final boolean includeStock, final boolean includeMacro) {
+        if (isFetchCycleRunning) {
+            return; // 이전 사이클이 아직 안 끝났음 - 겹쳐서 시작하지 않고 다음 틱을 기다림
+        }
+        isFetchCycleRunning = true;
+
         wifiPowerManager.ensureOnThen(new WifiPowerManager.OnWifiReadyListener() {
             @Override
             public void onWifiReady() {
                 pendingFetchCount = (includeStock ? 1 : 0) + (includeMacro ? 1 : 0);
-                if (pendingFetchCount == 0) return;
+                if (pendingFetchCount == 0) {
+                    isFetchCycleRunning = false;
+                    return;
+                }
                 // execute()만 쓰면 안드로이드 기본값(SERIAL_EXECUTOR)이 적용되어 두 작업이
                 // 동시가 아니라 순서대로 실행되어 버림 -> THREAD_POOL_EXECUTOR로 진짜 병렬 실행시킴
                 if (includeStock) {
@@ -364,6 +375,7 @@ public class MainActivity extends Activity {
     private void onFetchTaskDone() {
         pendingFetchCount--;
         if (pendingFetchCount <= 0) {
+            isFetchCycleRunning = false;
             wifiPowerManager.scheduleOff();
             // 화면이 최종 상태로 다시 그려질 시간을 살짝 준 뒤 캡처 (플래시 애니메이션 끝나고 나서)
             handler.postDelayed(new Runnable() {
@@ -558,26 +570,65 @@ public class MainActivity extends Activity {
     private class MacroFetchTask extends AsyncTask<Void, Void, MacroResult> {
         @Override
         protected MacroResult doInBackground(Void... voids) {
-            MacroResult macro = new MacroResult();
-            macro.usdKrw = fetchUsdKrw();
-            double[] kospi = fetchKospi();
-            macro.kospi = kospi[0];
-            macro.kospiChangePct = kospi[1];
-            macro.btcUsd = fetchSimplePrice("BINANCE:BTCUSDT");
-            macro.ethUsd = fetchSimplePrice("BINANCE:ETHUSDT");
+            final MacroResult macro = new MacroResult();
 
-            double[] dow = fetchWorldIndex("^DJI");
-            macro.dowValue = dow[0];
-            macro.dowChangePct = dow[1];
-            double[] nasdaq = fetchWorldIndex("^IXIC");
-            macro.nasdaqValue = nasdaq[0];
-            macro.nasdaqChangePct = nasdaq[1];
-            double[] sp500 = fetchWorldIndex("^GSPC");
-            macro.sp500Value = sp500[0];
-            macro.sp500ChangePct = sp500[1];
-            double[] vix = fetchWorldIndex("^VIX");
-            macro.vixValue = vix[0];
-            macro.vixChangePct = vix[1];
+            // 8개를 하나씩 순서대로 부르면 최악의 경우 8개 x 8초 = 64초까지 걸릴 수 있어서
+            // (1분 주기보다 길어질 위험) 병렬로 동시에 처리하도록 변경함
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(8);
+            java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+
+            futures.add(pool.submit(new Runnable() {
+                public void run() { macro.usdKrw = fetchUsdKrw(); }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() {
+                    double[] kospi = fetchKospi();
+                    macro.kospi = kospi[0];
+                    macro.kospiChangePct = kospi[1];
+                }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() { macro.btcUsd = fetchSimplePrice("BINANCE:BTCUSDT"); }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() { macro.ethUsd = fetchSimplePrice("BINANCE:ETHUSDT"); }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() {
+                    double[] dow = fetchWorldIndex("^DJI");
+                    macro.dowValue = dow[0];
+                    macro.dowChangePct = dow[1];
+                }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() {
+                    double[] nasdaq = fetchWorldIndex("^IXIC");
+                    macro.nasdaqValue = nasdaq[0];
+                    macro.nasdaqChangePct = nasdaq[1];
+                }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() {
+                    double[] sp500 = fetchWorldIndex("^GSPC");
+                    macro.sp500Value = sp500[0];
+                    macro.sp500ChangePct = sp500[1];
+                }
+            }));
+            futures.add(pool.submit(new Runnable() {
+                public void run() {
+                    double[] vix = fetchWorldIndex("^VIX");
+                    macro.vixValue = vix[0];
+                    macro.vixChangePct = vix[1];
+                }
+            }));
+
+            for (java.util.concurrent.Future<?> f : futures) {
+                try {
+                    f.get();
+                } catch (Exception ignored) {
+                }
+            }
+            pool.shutdown();
             return macro;
         }
 
