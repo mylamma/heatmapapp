@@ -2,12 +2,9 @@ package com.example.heatmap;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
 import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.view.KeyEvent;
 import android.view.WindowManager;
@@ -18,8 +15,6 @@ import android.widget.Toast;
 
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -315,17 +310,30 @@ public class MainActivity extends Activity {
 
     private static final long REFRESH_INTERVAL_MS = 60 * 1000L; // 1분마다 자동 갱신
 
-    /** 1분마다 자동 갱신 (시간대에 맞는 시장도 매번 다시 확인) */
+    /** 1분마다 데이터만 갱신 (시장 전환은 여기서 안 건드림 - 수동 전환이 바로 되돌려지는 것 방지) */
     private void scheduleNextHourlyTick() {
         refreshTask = new Runnable() {
             @Override
             public void run() {
-                autoSelectMarketByTime();
                 runFetchCycle(true, true);
                 handler.postDelayed(this, REFRESH_INTERVAL_MS);
             }
         };
         handler.postDelayed(refreshTask, REFRESH_INTERVAL_MS);
+        scheduleMarketAutoCheck();
+    }
+
+    private static final long MARKET_CHECK_INTERVAL_MS = 60 * 60 * 1000L; // 1시간마다만 시간대 재확인
+
+    /** 시장 자동전환은 1시간에 한 번만 체크 (매분 체크하면 수동 전환이 금방 되돌려짐) */
+    private void scheduleMarketAutoCheck() {
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                autoSelectMarketByTime();
+                scheduleMarketAutoCheck();
+            }
+        }, MARKET_CHECK_INTERVAL_MS);
     }
 
     /** 오전 7시~오후 6시59분(한국시간)은 한국장, 그 외 시간은 미국장을 자동으로 선택 */
@@ -377,55 +385,7 @@ public class MainActivity extends Activity {
         if (pendingFetchCount <= 0) {
             isFetchCycleRunning = false;
             wifiPowerManager.scheduleOff();
-            // 화면이 최종 상태로 다시 그려질 시간을 살짝 준 뒤 캡처 (플래시 애니메이션 끝나고 나서)
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    saveScreenshotToSleepFolder();
-                }
-            }, 2000);
         }
-    }
-
-    /**
-     * 현재 화면을 캡처해서 기기의 "sleep" 폴더에 저장 (크레마의 슬립화면 커스텀 이미지 기능 활용).
-     * 최초 1회, 기기 설정에서 이 파일을 슬립 화면으로 지정해두면 - 이 파일이 갱신될 때마다
-     * 슬립 화면도 최신 상태로 보이길 기대하는 실험적 기능 (기기가 선택 시점에 복사해두는
-     * 방식이면 매번 다시 지정해야 할 수도 있음 - 실제로 확인이 필요함).
-     */
-    private void saveScreenshotToSleepFolder() {
-        try {
-            if (root.getWidth() <= 0 || root.getHeight() <= 0) return;
-
-            Bitmap rawBitmap = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(rawBitmap);
-            root.draw(canvas);
-
-            // 화면을 180도 뒤집어서(reversePortrait) 쓰고 계셔서, 캡처한 이미지도 180도 회전시켜야
-            // 실제 슬립화면에서 보는 방향과 일치함 (실제 기기 테스트로 확인 완료)
-            android.graphics.Matrix matrix = new android.graphics.Matrix();
-            matrix.postRotate(180);
-            Bitmap rotatedBitmap = Bitmap.createBitmap(
-                    rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
-            rawBitmap.recycle();
-
-            File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
-            if (!sleepDir.exists()) {
-                sleepDir.mkdirs();
-            }
-            // 기존에 설정에서 이미 선택해두신 파일명을 그대로 유지 (재선택 안 해도 되게)
-            saveBitmapAs(rotatedBitmap, new File(sleepDir, "heatmap_sleep_rotated.png"));
-            rotatedBitmap.recycle();
-        } catch (Exception ignored) {
-            // 저장 실패해도 앱 동작에는 영향 없음 (슬립화면 갱신만 안 될 뿐)
-        }
-    }
-
-    private void saveBitmapAs(Bitmap bitmap, File outFile) throws Exception {
-        FileOutputStream out = new FileOutputStream(outFile);
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-        out.flush();
-        out.close();
     }
 
     private void showErrorScreen(Throwable t) {

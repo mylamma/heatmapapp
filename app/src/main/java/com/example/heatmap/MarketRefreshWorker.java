@@ -1,31 +1,21 @@
 package com.example.heatmap;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Matrix;
-import android.graphics.Point;
-import android.os.Environment;
-import android.view.Display;
-import android.view.View;
-import android.view.WindowManager;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 
 /**
  * 앱(MainActivity)이 화면에 떠 있지 않아도(프로세스가 꺼져 있어도) 실행 가능한
- * "시장 판단 -> 데이터 조회 -> 화면 렌더링 -> 슬립화면 저장" 전체 과정을 담당.
- * AlarmManager로 깨어난 HourlyUpdateReceiver가 이 클래스를 호출함.
+ * "시장 판단 -> 데이터 조회" 과정을 담당. AlarmManager로 깨어난 HourlyUpdateReceiver가
+ * 이 클래스를 호출해서, 앱이 죽어있는 동안에도 데이터가 최신 상태로 유지되게 함.
+ *
+ * (참고: 예전엔 여기서 화면을 렌더링해서 슬립화면 파일로 저장하는 기능도 있었는데,
+ * 크레마 기기가 슬립화면을 한 번 지정한 뒤로는 갱신을 반영 안 하는 것으로 확인되어
+ * 실효가 없는 부하만 주는 기능이라 제거함)
  */
 public class MarketRefreshWorker {
 
@@ -126,104 +116,5 @@ public class MarketRefreshWorker {
         m.vix = vix[0];
         m.vixPct = vix[1];
         return m;
-    }
-
-    /**
-     * 화면에 아무것도 안 띄운 채로(Activity 없이) 트리맵+상단바를 그려서 비트맵으로 캡처하고,
-     * 180도 회전시켜 슬립 폴더에 저장. MainActivity가 실행 중이 아니어도 동작함.
-     */
-    public static void renderAndSaveSleepImage(Context context, MainActivity.Market market, MacroSnapshot macro) {
-        try {
-            WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-            Display display = wm.getDefaultDisplay();
-            Point size = new Point();
-            display.getRealSize(size);
-            int width = size.x;
-            int height = size.y;
-            if (width <= 0 || height <= 0) return;
-
-            LinearLayout root = new LinearLayout(context);
-            root.setOrientation(LinearLayout.VERTICAL);
-            root.setBackgroundColor(Color.WHITE);
-
-            LinearLayout macroBar = new LinearLayout(context);
-            macroBar.setOrientation(LinearLayout.VERTICAL);
-            macroBar.setBackgroundColor(Color.BLACK);
-
-            TextView line1 = new TextView(context);
-            String marketLabel = market == MainActivity.Market.US ? "[미국장]" : "[국내장]";
-            StringBuilder l1 = new StringBuilder(marketLabel).append(" ");
-            l1.append(!Double.isNaN(macro.usdKrw) ? String.format(Locale.KOREA, "원/달러 %,.2f", macro.usdKrw) : "원/달러 --");
-            l1.append("   ");
-            if (!Double.isNaN(macro.kospi)) {
-                String sign = macro.kospiPct >= 0 ? "+" : "";
-                l1.append(String.format(Locale.KOREA, "코스피 %,.2f (%s%.2f%%)", macro.kospi, sign, macro.kospiPct));
-            } else {
-                l1.append("코스피 --");
-            }
-            l1.append("   ");
-            l1.append(!Double.isNaN(macro.btc) ? String.format(Locale.US, "BTC $%,.0f", macro.btc) : "BTC --");
-            l1.append("   ");
-            l1.append(!Double.isNaN(macro.eth) ? String.format(Locale.US, "ETH $%,.0f", macro.eth) : "ETH --");
-            line1.setText(l1.toString());
-            line1.setTextColor(Color.WHITE);
-            line1.setTextSize(12);
-            line1.setPadding(12, 8, 12, 2);
-            macroBar.addView(line1);
-
-            TextView line2 = new TextView(context);
-            StringBuilder l2 = new StringBuilder();
-            l2.append("다우 ").append(formatValuePct(macro.dow, macro.dowPct));
-            l2.append("   나스닥 ").append(formatValuePct(macro.nasdaq, macro.nasdaqPct));
-            l2.append("   S&P500 ").append(formatValuePct(macro.sp500, macro.sp500Pct));
-            l2.append("   VIX ").append(formatValuePct(macro.vix, macro.vixPct));
-            line2.setText(l2.toString());
-            line2.setTextColor(Color.WHITE);
-            line2.setTextSize(12);
-            line2.setPadding(12, 2, 12, 8);
-            macroBar.addView(line2);
-
-            root.addView(macroBar);
-
-            TreemapView treemapView = new TreemapView(context);
-            treemapView.setSectors(market == MainActivity.Market.US ? MainActivity.SECTORS_US : MainActivity.SECTORS_KR);
-            LinearLayout.LayoutParams treemapParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-            root.addView(treemapView, treemapParams);
-
-            // Activity 없이 수동으로 측정/배치/그리기 (화면에 실제로 띄우지 않고도 렌더링 가능)
-            int widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY);
-            int heightSpec = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY);
-            root.measure(widthSpec, heightSpec);
-            root.layout(0, 0, width, height);
-
-            Bitmap rawBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(rawBitmap);
-            root.draw(canvas);
-
-            Matrix matrix = new Matrix();
-            matrix.postRotate(180);
-            Bitmap rotatedBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, width, height, matrix, true);
-            rawBitmap.recycle();
-
-            File sleepDir = new File(Environment.getExternalStorageDirectory(), "sleep");
-            if (!sleepDir.exists()) sleepDir.mkdirs();
-            File outFile = new File(sleepDir, "heatmap_sleep_rotated.png");
-
-            FileOutputStream out = new FileOutputStream(outFile);
-            rotatedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-            out.flush();
-            out.close();
-            rotatedBitmap.recycle();
-        } catch (Exception ignored) {
-            // 실패해도 다음 시간에 다시 시도되므로 조용히 무시
-        }
-    }
-
-    private static String formatValuePct(double value, double pct) {
-        if (Double.isNaN(value)) return "--";
-        String sign = pct >= 0 ? "+" : "";
-        String pctText = Double.isNaN(pct) ? "" : String.format(Locale.US, " (%s%.2f%%)", sign, pct);
-        return String.format(Locale.US, "%,.2f%s", value, pctText);
     }
 }

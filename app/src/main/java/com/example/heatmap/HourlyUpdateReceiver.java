@@ -43,12 +43,10 @@ public class HourlyUpdateReceiver extends BroadcastReceiver {
                         try {
                             MainActivity.Market market = MarketRefreshWorker.determineMarketByTime();
                             MarketRefreshWorker.refreshStockData(appContext, market);
-                            MarketRefreshWorker.MacroSnapshot macro = MarketRefreshWorker.fetchMacroSnapshot();
-                            MarketRefreshWorker.renderAndSaveSleepImage(appContext, market, macro);
                         } catch (Exception ignored) {
                         } finally {
                             wifiPowerManager.scheduleOff();
-                            // 1분 뒤 다음 갱신도 계속 이어지도록 다시 예약
+                            // 10분 뒤 다음 갱신도 계속 이어지도록 다시 예약
                             scheduleNextHourlyAlarm(appContext);
                             if (wakeLock != null && wakeLock.isHeld()) {
                                 wakeLock.release();
