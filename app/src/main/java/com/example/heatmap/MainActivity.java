@@ -394,7 +394,7 @@ public class MainActivity extends Activity {
             // 화면을 180도 뒤집어서(reversePortrait) 쓰고 계셔서, 캡처한 이미지도 180도 회전시켜야
             // 실제로 보고 계신 방향과 슬립화면이 일치함
             android.graphics.Matrix matrix = new android.graphics.Matrix();
-            matrix.postRotate(180);
+            matrix.postRotate(0);
             Bitmap rotatedBitmap = Bitmap.createBitmap(
                     rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
             rawBitmap.recycle();
